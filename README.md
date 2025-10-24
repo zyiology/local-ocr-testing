@@ -24,7 +24,7 @@ Before running any experiments or workflows, ensure you have:
 2. **System requirements**:
    - **CUDA version**: Run `nvidia-smi` to check (should be 11.8, 12.4, or 12.8)
    - **GPU architecture**: Nvidia 4xxx series (Ada/Hopper) or 3xxx series (Ampere) recommended
-   - **Note**: Blackwell (5xxx series) may have compatibility issues with older PyTorch versions, will require tweaking pyproject.toml
+   - **Note**: Blackwell (5xxx series) may have compatibility issues with older PyTorch versions, refer below for more info
 
 ## Quick Start
 
@@ -84,3 +84,26 @@ ONLY add this if you are comfortable with the package management, any issues can
 You can install the package from https://github.com/mjun0812/flash-attention-prebuild-wheels/
 e.g. to get flash-attn v2.8.3, for my environment using CUDA 12.4, PyTorch 2.6 and Python 3.12, run `uv pip install https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.4.11/flash_attn-2.8.3+cu124torch2.6-cp312-cp312-linux_x86_64.whl`
 If successfully installed, you can uncomment the line to use flash attention
+
+## Troubleshooting Blackwell GPUs (5xxx Series)
+
+If you're using a Blackwell GPU (e.g., RTX 5060 Ti) and encounter compatibility issues, try the following:
+
+1. **Update CUDA references in `pyproject.toml`**:
+   - Check your CUDA version with `nvidia-smi`
+   - Update all CUDA references to match your version (e.g., change `cu118` to `cu128` for CUDA 12.8)
+
+2. **Relax version constraints if needed**:
+   - PyTorch wheels for newer CUDA versions may not exist for older package versions
+   - If `uv sync` fails, try changing exact version pins (`==`) to minimum versions (`>=`) in `pyproject.toml`
+
+3. **Example for CUDA 12.8**:
+   ```toml
+   # Change this:
+   "torch==2.6.0"
+   
+   # To this:
+   "torch>=2.6.0"
+   ```
+
+**Note**: These workarounds are not guaranteed to work in all cases, and may introduce new issues
