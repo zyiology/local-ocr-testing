@@ -2,24 +2,19 @@ from transformers import Qwen3VLForConditionalGeneration, AutoProcessor
 
 # default: Load the model on the available device(s)
 model = Qwen3VLForConditionalGeneration.from_pretrained(
-    "Qwen/Qwen3-VL-4B-Instruct", 
+    "Qwen/Qwen3-VL-2B-Instruct",
     dtype="auto",
     device_map="auto",
+    # attn_implementation="flash_attention_2",
 )
 
 print("model loaded")
 
-# We recommend enabling flash_attention_2 for better acceleration and memory saving, especially in multi-image and video scenarios.
-# model = Qwen3VLForConditionalGeneration.from_pretrained(
-#     "Qwen/Qwen3-VL-2B-Instruct",
-#     dtype=torch.bfloat16,
-#     attn_implementation="flash_attention_2",
-#     device_map="auto",
-# )
-
-processor = AutoProcessor.from_pretrained("Qwen/Qwen3-VL-4B-Instruct")
+processor = AutoProcessor.from_pretrained("Qwen/Qwen3-VL-2B-Instruct")
 
 print("processor loaded")
+
+## Adjust the prompt as needed
 
 prompt = """There is a table in this image. I've extracted the row headers as a csv:
 
@@ -45,6 +40,9 @@ Type of fracture*****,,
 
 Can you help me extract the data columns? You don't have to repeat the row headers again, just extract the data columns. You can ignore the rest of the document as well. Thanks!"""
 
+## Can use local image file, e.g. "image.png" placed in the same directory
+## Change to your own image path as needed
+
 messages = [
     {
         "role": "user",
@@ -56,7 +54,7 @@ messages = [
             },
             {
                 "type": "text",
-                "text": prompt, # "Please transcribe the table in this image into a tabular format.",
+                "text": prompt,  # "Please transcribe the table in this image into a tabular format.",
             },
         ],
     }
