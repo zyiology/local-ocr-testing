@@ -8,8 +8,16 @@
 - CUDA version installed (should be something like 11.8, 12.4, 12.8). Run `nvidia-smi` to check.
 - GPU architecture (e.g. Nvidia 5xxx series GPUs are Blackwell, 4xxx series are Ada, etc)
 - You may run into incompatibilities depending on the above... Currently, recommended to use Ada/Hopper GPUs if you don't want to troubleshoot incompatibilities.
-3. Generally, to setup the Python environment for a given LLM, `cd` to the target folder, and run `uv sync`.
-4. Read the README.md in the respective folder for instructions on how to run the given LLM.
+
+## General Setup Instructions
+
+To setup the Python environment for a given LLM
+1. `cd` to the target folder
+2. Run `uv sync` to install the packages
+3. A `.venv` folder should be created with all the packages
+4. While terminal is in that folder, run `.venv\Scripts\python.exe main.py` to run the main script
+
+There may be more instructions depending on the given LLM, please read the README.md in the respective folder before doing the above steps.
 
 # Flash Attention
 
