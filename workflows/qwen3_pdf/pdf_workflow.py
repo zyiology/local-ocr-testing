@@ -6,6 +6,7 @@ from transformers import (
 from converter import pdf_to_images, get_pdf_page_size, save_images
 from pathlib import Path
 import importlib.util
+import argparse
 
 QWEN_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct"
 MOE = True  # Set to True if using the MoE model
@@ -149,5 +150,44 @@ def qwen_process_image(image_path: str, model, processor) -> str:
 
 
 if __name__ == "__main__":
-    pdf_folder_path = Path("pdfs")
-    main(pdf_folder_path)
+    parser = argparse.ArgumentParser(
+        description="Batch process PDFs with Qwen3-VL OCR models"
+    )
+    parser.add_argument(
+        "--pdf-folder",
+        type=Path,
+        default=Path(__file__).parent / "../../data/pdfs",
+        help="Path to folder containing PDF files (default: ../../data/pdfs/)",
+    )
+    parser.add_argument(
+        "--output-folder",
+        type=Path,
+        default=Path(__file__).parent / "../../data/output",
+        help="Path to output folder for results (default: ../../data/output/)",
+    )
+
+    args = parser.parse_args()
+
+    # Resolve paths to absolute
+    pdf_folder = args.pdf_folder.resolve()
+    output_folder = args.output_folder.resolve()
+
+    # Validate PDF folder exists
+    if not pdf_folder.exists():
+        print(f"Error: PDF folder not found: {pdf_folder}")
+        print("Please create the folder or specify a different path with --pdf-folder")
+        exit(1)
+
+    if not any(pdf_folder.glob("*.pdf")):
+        print(f"Warning: No PDF files found in {pdf_folder}")
+        exit(1)
+
+    # Create output folder if it doesn't exist
+    output_folder.mkdir(parents=True, exist_ok=True)
+
+    print(f"PDF folder: {pdf_folder}")
+    print(f"Output folder: {output_folder}")
+    print(f"Found {len(list(pdf_folder.glob('*.pdf')))} PDF file(s)")
+    print()
+
+    main(pdf_folder, output_folder)

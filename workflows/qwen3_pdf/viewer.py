@@ -1,7 +1,7 @@
 """
 OCR Results Viewer GUI
 
-A simple tkinter-based GUI for browsing through OCR results in output_30b folders.
+A simple tkinter-based GUI for browsing through OCR results folders.
 Displays images and their corresponding OCR text side-by-side with keyboard navigation.
 """
 
@@ -10,6 +10,8 @@ from tkinter import scrolledtext
 from pathlib import Path
 from typing import List
 from PIL import Image, ImageTk
+import argparse
+import sys
 
 
 class OCRViewer:
@@ -242,19 +244,64 @@ class OCRViewer:
 
 def main() -> None:
     """Main entry point for the viewer."""
-    # Get the output directory (relative to this script)
-    script_dir = Path(__file__).parent
-    output_dir = script_dir / "output_30b"
+    parser = argparse.ArgumentParser(
+        description="View OCR results from batch PDF processing"
+    )
+    parser.add_argument(
+        "output_dir",
+        type=Path,
+        nargs="?",  # Make it optional
+        default=None,
+        help="Path to the output directory containing OCR results",
+    )
+    parser.add_argument(
+        "--default",
+        action="store_true",
+        help="Use default path (../../data/output/)",
+    )
 
+    args = parser.parse_args()
+
+    # Determine output directory
+    if args.output_dir:
+        output_dir = args.output_dir.resolve()
+    else:
+        # Default to ../../data/output relative to this script
+        script_dir = Path(__file__).parent
+        output_dir = (script_dir / "../../data/output").resolve()
+
+    # Check if directory exists
     if not output_dir.exists():
         print(f"Error: Output directory not found: {output_dir}")
-        return
+        print("\nPlease ensure you've run pdf_workflow.py first to generate results.")
+        print("\nUsage:")
+        print(f"  python viewer.py                    # Use default: {output_dir}")
+        print("  python viewer.py <path>             # Use custom path")
+        print("  python viewer.py --help             # Show help")
+        sys.exit(1)
+
+    # Check if directory has any valid folders
+    valid_folders = []
+    for folder in output_dir.iterdir():
+        if folder.is_dir():
+            if (folder / "image0.png").exists() and (folder / "image0.txt").exists():
+                valid_folders.append(folder)
+
+    if not valid_folders:
+        print(f"Error: No valid OCR result folders found in: {output_dir}")
+        print("\nValid folders should contain both 'image0.png' and 'image0.txt'")
+        print("Please run pdf_workflow.py first to generate results.")
+        sys.exit(1)
+
+    print(f"Loading OCR results from: {output_dir}")
+    print(f"Found {len(valid_folders)} result folder(s)\n")
 
     try:
         viewer = OCRViewer(output_dir)
         viewer.run()
     except ValueError as e:
         print(f"Error: {e}")
+        sys.exit(1)
     except KeyboardInterrupt:
         print("\nViewer closed by user")
 

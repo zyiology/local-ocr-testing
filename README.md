@@ -1,25 +1,79 @@
 # Local OCR Testing
 
-## Overall Instructions
+A repository for experimenting with various LLM-based OCR solutions running locally. Contains both simple single-image experiments and more complete batch processing workflows.
 
-1. Each folder, e.g. deepseek-ocr, qwen3, contains a setup to run given LLMs locally for OCR testing.
-2. Ensure you have `uv` installed. On Windows, run in powershell `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"` to install. Refer to https://docs.astral.sh/uv/getting-started/installation/ for more info
-3. Make sure you know the following
-- CUDA version installed (should be something like 11.8, 12.4, 12.8). Run `nvidia-smi` to check.
-- GPU architecture (e.g. Nvidia 5xxx series GPUs are Blackwell, 4xxx series are Ada, etc)
-- You may run into incompatibilities depending on the above... (e.g. Blackwell is not supported on some older versions of PyTorch) Currently, recommended to use Ada/Hopper GPUs if you don't want to troubleshoot incompatibilities.
+## Repository Structure
 
-## General Setup Instructions
+- **`experiments/`** - Quick tests of different LLM models on single images
+  - `deepseek-ocr/` - DeepSeek-OCR model testing
+  - `qwen3/` - Qwen3-VL basic functionality testing
+- **`workflows/`** - More complete demo workflows for specific use cases
+  - `qwen3_pdf/` - Batch PDF processing with Qwen3-VL models
+- **`data/`** - Input files and output results (git-ignored)
 
-To setup the Python environment for a given LLM
-1. `cd` to the target folder
-2. Run `uv sync` to install the packages
-3. A `.venv` folder should be created with all the packages
-4. While terminal is in that folder, run `.venv\Scripts\python.exe main.py` to run the main script
+## Prerequisites
 
-There may be more instructions depending on the given LLM, please read the README.md in the respective folder before doing the above steps.
+Before running any experiments or workflows, ensure you have:
 
-# Flash Attention
+1. **`uv` package manager** installed:
+   ```powershell
+   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+   ```
+   See https://docs.astral.sh/uv/getting-started/installation/ for more info.
+
+2. **System requirements**:
+   - **CUDA version**: Run `nvidia-smi` to check (should be 11.8, 12.4, or 12.8)
+   - **GPU architecture**: Nvidia 4xxx series (Ada/Hopper) or 3xxx series (Ampere) recommended
+   - **Note**: Blackwell (5xxx series) may have compatibility issues with older PyTorch versions, will require tweaking pyproject.toml
+
+## Quick Start
+
+### Running Experiments
+
+Simple single-image tests to evaluate different models:
+
+1. Navigate to an experiment folder:
+   ```powershell
+   cd experiments/qwen3
+   # or
+   cd experiments/deepseek-ocr
+   ```
+
+2. Install dependencies and run:
+   ```powershell
+   uv sync
+   .venv\Scripts\python.exe main.py
+   ```
+
+See individual experiment READMEs for model-specific configuration.
+
+### Running Workflows
+
+More complete demos for batch processing:
+
+1. Navigate to a workflow folder:
+   ```powershell
+   cd workflows/qwen3_pdf
+   ```
+
+2. Install dependencies:
+   ```powershell
+   uv sync
+   ```
+
+3. Run the workflow:
+   ```powershell
+   .venv\Scripts\python.exe pdf_workflow.py
+   ```
+
+4. View results with the GUI viewer:
+   ```powershell
+   .venv\Scripts\python.exe viewer.py
+   ```
+
+See individual workflow READMEs for detailed usage instructions.
+
+## Flash Attention
 
 You may notice the commented-out lines, e.g. ` # attn_implementation="flash_attention_2"`, in the scripts.
 Flash Attention is a package that can increase the RAM efficiency and speed of the model, but requires installing the correct version for the existing version of PyTorch/CUDA.
