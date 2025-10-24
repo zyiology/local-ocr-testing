@@ -1,5 +1,8 @@
-.png
+*.png
 .venv
 __pycache__/
 .ipynb_checkpoints/
 .vscode/
+
+*.pdf
+*.txt
