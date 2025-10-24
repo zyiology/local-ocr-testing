@@ -5,26 +5,47 @@ from transformers import (
 )
 from converter import pdf_to_images, get_pdf_page_size, save_images
 from pathlib import Path
+import importlib.util
 
 QWEN_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct"
 MOE = True  # Set to True if using the MoE model
 
 
+def check_flash_attention_available() -> bool:
+    """Check if Flash Attention 2 is available on the system.
+
+    Returns:
+        bool: True if flash_attn is installed and available, False otherwise.
+    """
+    return importlib.util.find_spec("flash_attn") is not None
+
+
 def main(pdf_folder_path: Path, output_folder: Path = Path("output/")):
-    # default: Load the model on the available device(s)
+    # Check if Flash Attention 2 is available
+    use_flash_attn = check_flash_attention_available()
+    if use_flash_attn:
+        print("Flash Attention 2 detected - using optimized attention implementation")
+        attn_implementation = "flash_attention_2"
+    else:
+        print("Flash Attention 2 not available - using default 'eager' implementation")
+        attn_implementation = "eager"
+
+    # Load the model on the available device(s)
+    model_kwargs = {
+        "dtype": "auto",
+        "device_map": "auto",
+        "attn_implementation": attn_implementation,
+    }
+
     if MOE:
         model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
             QWEN_MODEL,
-            dtype="auto",
-            device_map="auto",
-            # attn_implementation="flash_attention_2",
+            **model_kwargs,
         )
     else:
         model = Qwen3VLForConditionalGeneration.from_pretrained(
             QWEN_MODEL,
-            dtype="auto",
-            device_map="auto",
-            # attn_implementation="flash_attention_2",
+            **model_kwargs,
         )
 
     print("model loaded")
