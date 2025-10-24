@@ -24,6 +24,8 @@ There may be more instructions depending on the given LLM, please read the READM
 You may notice the commented-out lines, e.g. ` # attn_implementation="flash_attention_2"`, in the scripts.
 Flash Attention is a package that can increase the RAM efficiency and speed of the model, but requires installing the correct version for the existing version of PyTorch/CUDA.
 
+ONLY add this if you are comfortable with the package management, any issues can be more complicated to resolve.
+
 You can install the package from https://github.com/mjun0812/flash-attention-prebuild-wheels/
 e.g. to get flash-attn v2.8.3, for my environment using CUDA 12.4, PyTorch 2.6 and Python 3.12, run `uv pip install https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.4.11/flash_attn-2.8.3+cu124torch2.6-cp312-cp312-linux_x86_64.whl`
 If successfully installed, you can uncomment the line to use flash attention
