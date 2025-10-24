@@ -7,7 +7,7 @@
 3. Make sure you know the following
 - CUDA version installed (should be something like 11.8, 12.4, 12.8). Run `nvidia-smi` to check.
 - GPU architecture (e.g. Nvidia 5xxx series GPUs are Blackwell, 4xxx series are Ada, etc)
-- You may run into incompatibilities depending on the above... Currently, recommended to use Ada/Hopper GPUs if you don't want to troubleshoot incompatibilities.
+- You may run into incompatibilities depending on the above... (e.g. Blackwell is not supported on some older versions of PyTorch) Currently, recommended to use Ada/Hopper GPUs if you don't want to troubleshoot incompatibilities.
 
 ## General Setup Instructions
 
@@ -24,6 +24,7 @@ There may be more instructions depending on the given LLM, please read the READM
 You may notice the commented-out lines, e.g. ` # attn_implementation="flash_attention_2"`, in the scripts.
 Flash Attention is a package that can increase the RAM efficiency and speed of the model, but requires installing the correct version for the existing version of PyTorch/CUDA.
 
+ONLY works on Linux
 ONLY add this if you are comfortable with the package management, any issues can be more complicated to resolve.
 
 You can install the package from https://github.com/mjun0812/flash-attention-prebuild-wheels/

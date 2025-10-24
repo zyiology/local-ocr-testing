@@ -1,9 +1,38 @@
-from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
+from transformers import (
+    AutoProcessor,
+    Qwen3VLForConditionalGeneration,
+    Qwen3VLMoeForConditionalGeneration,
+)
 from converter import pdf_to_images, get_pdf_page_size, save_images
 from pathlib import Path
 
+QWEN_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct"
+MOE = True  # Set to True if using the MoE model
+
 
 def main(pdf_folder_path: Path, output_folder: Path = Path("output/")):
+    # default: Load the model on the available device(s)
+    if MOE:
+        model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
+            QWEN_MODEL,
+            dtype="auto",
+            device_map="auto",
+            # attn_implementation="flash_attention_2",
+        )
+    else:
+        model = Qwen3VLForConditionalGeneration.from_pretrained(
+            QWEN_MODEL,
+            dtype="auto",
+            device_map="auto",
+            # attn_implementation="flash_attention_2",
+        )
+
+    print("model loaded")
+
+    processor = AutoProcessor.from_pretrained(QWEN_MODEL)
+
+    print("processor loaded")
+
     image_paths = []
     for pdf_path in pdf_folder_path.glob("*.pdf"):
         # Get PDF page size
@@ -19,20 +48,6 @@ def main(pdf_folder_path: Path, output_folder: Path = Path("output/")):
         # Save images
         pdf_output_folder = output_folder / pdf_path.stem
         image_paths.extend(save_images(pdf_output_folder, images))
-
-    # default: Load the model on the available device(s)
-    model = Qwen3VLForConditionalGeneration.from_pretrained(
-        "Qwen/Qwen3-VL-2B-Instruct",
-        dtype="auto",
-        device_map="auto",
-        # attn_implementation="flash_attention_2",
-    )
-
-    print("model loaded")
-
-    processor = AutoProcessor.from_pretrained("Qwen/Qwen3-VL-2B-Instruct")
-
-    print("processor loaded")
 
     for image_path in image_paths:
         output_text = qwen_process_image(str(image_path), model, processor)
