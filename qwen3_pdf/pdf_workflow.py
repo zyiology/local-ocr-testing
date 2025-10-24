@@ -40,12 +40,12 @@ def main(pdf_folder_path: Path, output_folder: Path = Path("output/")):
     if MOE:
         model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
             QWEN_MODEL,
-            **model_kwargs,
+            **model_kwargs,  # type: ignore
         )
     else:
         model = Qwen3VLForConditionalGeneration.from_pretrained(
             QWEN_MODEL,
-            **model_kwargs,
+            **model_kwargs,  # type: ignore
         )
 
     print("model loaded")
