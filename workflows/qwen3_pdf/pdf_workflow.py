@@ -56,7 +56,7 @@ def main(pdf_folder_path: Path, output_folder: Path = Path("output/")):
     print("processor loaded")
 
     image_paths = []
-    for pdf_path in pdf_folder_path.glob("*.pdf"):
+    for pdf_path in pdf_folder_path.rglob("*.pdf"):
         # Get PDF page size
         page_size = get_pdf_page_size(pdf_path)
 
@@ -67,8 +67,9 @@ def main(pdf_folder_path: Path, output_folder: Path = Path("output/")):
         # Convert PDF to images
         images = pdf_to_images(pdf_path, dpi=dpi)
 
-        # Save images
-        pdf_output_folder = output_folder / pdf_path.stem
+        # Save images - preserve directory structure
+        relative_path = pdf_path.relative_to(pdf_folder_path)
+        pdf_output_folder = output_folder / relative_path.parent / pdf_path.stem
         image_paths.extend(save_images(pdf_output_folder, images))
 
     for image_path in image_paths:
@@ -178,7 +179,7 @@ if __name__ == "__main__":
         print("Please create the folder or specify a different path with --pdf-folder")
         exit(1)
 
-    if not any(pdf_folder.glob("*.pdf")):
+    if not any(pdf_folder.rglob("*.pdf")):
         print(f"Warning: No PDF files found in {pdf_folder}")
         exit(1)
 
@@ -187,7 +188,7 @@ if __name__ == "__main__":
 
     print(f"PDF folder: {pdf_folder}")
     print(f"Output folder: {output_folder}")
-    print(f"Found {len(list(pdf_folder.glob('*.pdf')))} PDF file(s)")
+    print(f"Found {len(list(pdf_folder.rglob('*.pdf')))} PDF file(s)")
     print()
 
     main(pdf_folder, output_folder)
