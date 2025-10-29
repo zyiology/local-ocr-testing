@@ -11,6 +11,8 @@ dependencies = [
     "tokenizers==0.20.3",
     "torch==2.6.0",
     "transformers==4.46.3",
+    "torchvision",
+    "pillow"
 ]
 
 [[tool.uv.index]]

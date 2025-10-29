@@ -1,0 +1,359 @@
+# Proposal: Text-Anchored Two-Stage Table Extraction (PDF → Structured Data)
+
+## 1) Overview
+
+This proposal describes a **text-anchored** workflow to extract tables from PDFs that may be rasterized. The approach avoids fine-grained geometry and numeric coordinates, leaning instead on:
+(1) a **row-header pass** that yields a normalized, flat list of headers,
+(2) a **row-by-row data pass** that copies values anchored by those headers and a fixed column schema, and
+(3) strict **validation and retry** logic.
+Optional minimal geometry (table bounding box or row strip crop) is used only as a fallback to reduce context noise—not as a primary control signal.
+
+---
+
+## 2) Detailed Workflow
+
+### Step 0 — PDF → Image
+
+* Render each page to PNG at **300–400 DPI** (600 DPI if text is tiny).
+* Light preprocessing: deskew if needed; avoid aggressive thresholding.
+
+### Step 1 — Extract Row Headers (Structure-Only)
+
+* Input: full page image (or optional table crop).
+* Output: strict JSON of normalized row headers, each a standalone string.
+* Rules:
+
+  * Ignore all numeric data values.
+  * Flatten multi-level/merged labels using a delimiter (e.g., `" | "`).
+  * Preserve literal text (no spelling corrections).
+* Example output:
+
+  ```json
+  {"rows":[{"row_id":"R1","header":"Total | Region A"}, {"row_id":"R2","header":"Total | Region B"}]}
+  ```
+
+### Step 2 — Determine Column Schema (Names & Count)
+
+* Input: same image as Step 1.
+* Output: strict JSON array of column headers in left-to-right order:
+
+  ```json
+  {"columns":["Q1","Q2","Q3","Q4"]}
+  ```
+* If the document type is known and stable, the schema may be **predefined** and this step skipped.
+
+### Step 3 — Row-Anchored Data Extraction
+
+* Iterate **one row at a time** using the known header string and column schema.
+* Prompt the VLM to produce a **single CSV line** with **exactly N fields** (N = number of columns), copying values verbatim.
+* Rules:
+
+  * No calculations, formatting, or “fixing” numbers.
+  * Empty/merged cells must be emitted as empty fields (`""`) but keep commas.
+  * If the row cannot be located, return a sentinel (e.g., `__ROW_NOT_FOUND__`).
+
+### Step 4 — Assembly & Validation
+
+* Combine headers (Step 1) and row CSVs (Step 3).
+* Hard validations:
+
+  * Row count: number of CSV rows **equals** headers count.
+  * Field count: each CSV splits into **exactly** N fields.
+  * Optional per-column validators (regex/type parsers: dates, decimals, percents, codes).
+* Soft validations:
+
+  * Optional OCR token cross-check (bag-of-words / numerics only).
+  * Optional dual-model consensus on contentious rows.
+
+### Step 5 — Targeted Retry & Fallbacks
+
+* Retry only failing rows/cells with:
+
+  * Higher-DPI re-render for that page.
+  * Alternative reader/model (e.g., switch 30B ↔ 32B ↔ 235B).
+  * Optional **minimal** geometry: crop to **table bbox** or **row strip** to reduce distractions.
+* If unresolved, mark row/cell as low confidence and return a machine-actionable error report.
+
+### Step 6 — Output & Artifacts
+
+* Emit JSON and CSV:
+
+  * JSON: schema with `columns`, `rows[{row_id, header, cells[]}]`, and `issues`.
+  * CSV: header row using `columns`, followed by one CSV line per row.
+* Include a **quality report**: failed validators, retries performed, confidence notes.
+
+---
+
+## 3) Implementation Process (Step-by-Step)
+
+### A. Project Structure
+
+```
+table_extractor/
+  cli/
+    extract.py
+  core/
+    rasterize.py
+    prompts.py
+    vlm_client.py        # Alibaba/Qwen client wrappers
+    pipeline.py          # Orchestrates steps 0–5
+    validators.py
+    assembly.py
+    retries.py
+    ocr_check.py         # optional, token bag cross-check
+    dto.py               # type schemas
+  tests/
+    test_pipeline.py
+    test_validators.py
+    fixtures/            # gold PDFs/images and expected outputs
+  README.md
+```
+
+### B. Data Contracts (DTOs)
+
+```ts
+// dto.ts (TypeScript-like types for clarity)
+type RowHeader = { row_id: string; header: string };
+type Headers = { rows: RowHeader[] };
+type Columns = { columns: string[] };
+
+type RowCsv = { row_id: string; csv: string };
+
+type TableOut = {
+  columns: string[];
+  rows: { row_id: string; header: string; cells: string[] }[];
+  issues: { row_id: string; message: string }[];
+};
+
+type QualityReport = {
+  missing_rows: string[];               // row_ids with __ROW_NOT_FOUND__
+  field_count_mismatches: string[];     // row_ids with != N fields
+  validator_errors: { row_id: string; column: string; reason: string }[];
+  ocr_disagreements?: { row_id: string; column: string; token: string }[];
+  retries: { row_id: string; strategy: string; success: boolean }[];
+};
+```
+
+### C. Prompt Snippets
+
+**Step 1 — Row Headers**
+
+```
+There is one table in this image.
+
+TASK: Extract only the row headers as a flat list where each header is standalone.
+If headers are multi-level or merged, concatenate levels with " | ".
+
+Return STRICT JSON only:
+{"rows":[{"row_id":"R1","header":"..."},{"row_id":"R2","header":"..."}]}
+
+Rules:
+- Ignore all numeric data values and the rest of the document.
+- Preserve text verbatim; do not correct spelling.
+- Do not include data cells.
+- Never include digits unless they are part of the header text itself.
+```
+
+**Step 2 — Column Schema**
+
+```
+From this table image, extract the column headers left-to-right.
+
+Return STRICT JSON only:
+{"columns":["Col1","Col2","Col3"]}
+
+Rules:
+- Only names of data columns (no sample values or counts).
+- Preserve literal text; no normalization beyond trimming.
+```
+
+**Step 3 — Row-Anchored CSV (N columns)**
+
+```
+The image shows a table. Extract ONE row.
+
+Row header to find (exact text or closest visually aligned header on the left):
+<<HEADER>>
+
+Column schema (left-to-right):
+<<JSON_ARRAY_OF_COLUMNS>>
+
+Output ONLY the row's data cells as a single CSV line with EXACTLY N fields.
+Rules:
+- Copy text verbatim (digits/punctuation).
+- Represent empty or merged cells as empty fields.
+- No spaces around commas. No quotes. No explanations.
+- If the row cannot be found, output: __ROW_NOT_FOUND__
+```
+
+### D. Core Modules
+
+1. **rasterize.py**
+
+   * `render_pdf(pdf_path) -> List[PageImage]`
+     Uses `pypdfium2` or `pdf2image` to produce PNGs at configurable DPI.
+   * Optional: deskew.
+
+2. **vlm_client.py**
+
+   * Thin wrappers for Alibaba/Qwen APIs:
+
+     * `extract_headers(image_bytes) -> Headers`
+     * `extract_columns(image_bytes) -> Columns`
+     * `extract_row_csv(image_bytes, header: str, columns: List[str], n: int) -> RowCsv`
+   * Enforce `temperature=0`, deterministic settings.
+
+3. **validators.py**
+
+   * Cardinality checks (row count, field count).
+   * Column type/regex validators (configurable per project).
+   * Normalization utilities (trim, collapse spaces, dehyphenation).
+
+4. **ocr_check.py** (optional)
+
+   * `numeric_token_bag(image_bytes) -> Set[str]`
+   * Compares extracted numerics against OCR tokens; flags disagreements.
+
+5. **assembly.py**
+
+   * `assemble(headers: Headers, columns: Columns, row_csvs: List[RowCsv]) -> TableOut`
+   * Splits CSVs, aligns with headers, constructs `issues`.
+
+6. **retries.py**
+
+   * Targeted retry strategies:
+
+     * re-render at 600 DPI,
+     * alternate model (30B/32B/235B),
+     * optional minimal crop (table bbox or row strip).
+   * Policy: retry only rows failing validators or with sentinel outputs.
+
+7. **pipeline.py**
+
+   * Orchestrates Steps 0–5:
+
+     1. Rasterize page
+     2. Headers
+     3. Columns (or load predefined schema)
+     4. Parallel per-row extraction (bounded concurrency)
+     5. Assembly + validation
+     6. Targeted retries; re-validate
+     7. Emit artifacts (JSON/CSV + quality report)
+
+### E. CLI & Usage
+
+**CLI (`cli/extract.py`)**
+
+```
+python -m table_extractor.cli.extract \
+  --pdf input.pdf \
+  --page 3 \
+  --dpi 400 \
+  --out-json out/table.json \
+  --out-csv  out/table.csv \
+  --schema schemas/report_v2.json        # optional predefined columns
+  --max-retries 2
+```
+
+### F. Testing & Acceptance
+
+* **Fixture set**: ~20 representative pages (borders, borderless, merged cells, tiny text).
+* **Metrics**:
+
+  * Overall cell accuracy ≥ **95%**, numeric columns ≥ **98%**.
+  * **0** cardinality errors (row/column counts must align) in final output.
+  * Per-row latency budget and total runtime targets (recorded in test logs).
+* **Golden tests**:
+
+  * `tests/test_pipeline.py`: end-to-end against expected JSON/CSV.
+  * `tests/test_validators.py`: regex/type validators, CSV splitting edge cases.
+* **Determinism**:
+
+  * Temperature 0, fixed seeds, retry policies logged.
+
+### G. Operational Considerations
+
+* **Caching**: cache image bytes and page renders; headers/columns can be reused for retries.
+* **Parallelism**: parallelize per-row extraction with bounded concurrency to control API throughput.
+* **Observability**: structured logs including prompts, model IDs, retry outcomes, and validator errors.
+* **Configuration**:
+
+  * Delimiter for header flattening (`" | "` by default).
+  * Column validator registry per document type.
+  * Retry policy (max attempts, strategies order).
+
+### H. Risks & Mitigations
+
+* **Near-duplicate headers** may anchor to the wrong row.
+  *Mitigation*: pre-check header presence; if ambiguous, ask the model a YES/NO “header exists” question, or fuzzy-match within the Step-1 set and log a warning.
+* **Sparse or rotated scans** reduce readability.
+  *Mitigation*: per-row fallback with higher DPI; optional deskew; minimal row crop.
+* **Model drift into explanations**.
+  *Mitigation*: strict output formats; sentinel tokens; temperature 0; post-parse hard checks.
+* **Borderless tables with weak visual alignment**.
+  *Mitigation*: reuse Step-1 list order as the canonical top-to-bottom traversal; optional row strip crop on retry.
+
+---
+
+## 4) Deliverables
+
+1. Python package with modules outlined above.
+2. CLI for per-page extraction.
+3. Configuration examples (predefined column schemas, validator sets).
+4. Test suite with golden pages and expected outputs.
+5. Documentation:
+
+   * Prompts reference
+   * Validator cookbook
+   * Retry policy guide
+   * Operational runbook (logging, caching, parallelism)
+
+---
+
+## 5) Success Criteria
+
+* Valid, machine-readable JSON/CSV with **exact row/column cardinality**.
+* ≥95% cell-level accuracy overall; ≥98% on numeric columns across the fixture set.
+* Clear, actionable quality report for any remaining issues (no silent failures).
+
+Mermaid Chart
+flowchart TD
+  %% Text-anchored two-stage table extraction (no special chars in labels)
+
+  A[Start] --> B[PDF to image at 300 to 400 DPI; optional 600; light deskew]
+  B --> C{Table detected}
+  C -- No --> Z1[Emit no table result and skip page] --> A
+  C -- Yes --> D[Cache image bytes]
+
+  %% Step 1: Row headers
+  D --> E[Step 1 extract row headers as flat list; normalize multi level with pipe delimiter]
+  
+  %% Step 2: Column schema
+  E --> F{Predefined column schema}
+  F -- Yes --> I[Use predefined columns]
+  F -- No --> H[Step 2 extract column headers left to right]
+  H --> I
+
+  %% Step 3: Row by row extraction
+  I --> J[Step 3 for each row header perform row anchored extraction; output one CSV line with exactly N fields; no explanations; empty cells allowed]
+  J --> K[Parallel execution with bounded concurrency]
+
+  %% Step 4: Assembly and validation
+  K --> L[Step 4 assemble rows and columns; validate row count and field count]
+  L --> M{Hard validations pass}
+  M -- Yes --> N{Run optional soft checks}
+  M -- No --> S[Queue targeted retries]
+
+  %% Soft checks
+  N -- No --> P[Prepare quality report]
+  N -- Yes --> O[Run soft checks; OCR token cross check; dual model consensus] --> P
+
+  %% Step 5: Targeted retry and fallbacks
+  S --> S1{Retry budget left}
+  S1 -- No --> T[Emit results with issues]
+  S1 -- Yes --> S2[Retry strategies; higher DPI; alternate model; optional minimal crop table bbox or row strip] --> J
+
+  %% Step 6: Outputs
+  P --> Q[Step 6 outputs; JSON; CSV; quality report]
+  T --> Q
+  Q --> A

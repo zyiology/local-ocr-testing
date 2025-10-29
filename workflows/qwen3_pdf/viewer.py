@@ -45,13 +45,13 @@ class OCRViewer:
 
     def _get_valid_folders(self) -> List[Path]:
         """
-        Scan output directory and return sorted list of valid folders.
+        Recursively scan output directory and return sorted list of valid folders.
 
         Returns:
             List of folder paths that contain both image0.png and image0.txt
         """
         folders = []
-        for folder in sorted(self.output_dir.iterdir()):
+        for folder in sorted(self.output_dir.rglob("*")):
             if folder.is_dir():
                 image_file = folder / "image0.png"
                 text_file = folder / "image0.txt"
@@ -153,7 +153,7 @@ class OCRViewer:
     def _load_current_folder(self) -> None:
         """Load and display the current folder's image and text."""
         folder = self.folders[self.current_index]
-        folder_name = folder.name
+        folder_name = folder.relative_to(self.output_dir)
 
         # Update title
         title = f"Folder {self.current_index + 1}/{len(self.folders)}: {folder_name}"
@@ -280,9 +280,9 @@ def main() -> None:
         print("  python viewer.py --help             # Show help")
         sys.exit(1)
 
-    # Check if directory has any valid folders
+    # Check if directory has any valid folders (search recursively)
     valid_folders = []
-    for folder in output_dir.iterdir():
+    for folder in output_dir.rglob("*"):
         if folder.is_dir():
             if (folder / "image0.png").exists() and (folder / "image0.txt").exists():
                 valid_folders.append(folder)
@@ -295,6 +295,11 @@ def main() -> None:
 
     print(f"Loading OCR results from: {output_dir}")
     print(f"Found {len(valid_folders)} result folder(s)\n")
+
+    print("Valid result folders:")
+    # print out list of all result folders
+    for folder in valid_folders:
+        print(f"{folder.relative_to(output_dir)}")
 
     try:
         viewer = OCRViewer(output_dir)

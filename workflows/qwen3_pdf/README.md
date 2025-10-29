@@ -15,24 +15,61 @@ This workflow demonstrates:
 - **Minimum CUDA version**: 11.8
 - **VRAM**: Depends on model choice (see below)
 
-## Components
+## Architecture
 
-### 1. `pdf_workflow.py`
+The workflow uses a provider pattern for clean separation of concerns:
+
+```
+workflows/qwen3_pdf/
+├── pdf_workflow.py       # Main orchestrator
+├── config.py             # Configuration settings
+├── converter.py          # PDF utilities
+├── viewer.py             # GUI viewer
+└── providers/            # OCR provider implementations
+    ├── __init__.py
+    ├── base.py           # Abstract base class
+    ├── local.py          # Local Transformers provider
+    └── alibaba_cloud.py  # Alibaba Cloud API provider
+```
+
+### Components
+
+#### 1. `pdf_workflow.py`
 Main script that orchestrates the batch processing pipeline.
 
 **What it does**:
-1. Scans a folder for PDF files
-2. Converts each PDF page to high-resolution images
-3. Runs Qwen3-VL OCR on each image
-4. Saves extracted text alongside images
+1. Initializes the OCR provider (local model)
+2. Scans a folder for PDF files
+3. Converts each PDF page to high-resolution images
+4. Processes each image with the provider
+5. Saves extracted text alongside images
 
-**Default configuration**:
-- Model: `Qwen/Qwen3-VL-30B-A3B-Instruct`
-- Target image size: 1800px (longest side)
-- Input: `../../data/pdfs/`
-- Output: `../../data/output/`
+#### 2. `config.py`
+Centralized configuration for the workflow.
 
-### 2. `converter.py`
+**Settings**:
+- Model: `DEFAULT_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct"`
+- Target image size: `TARGET_LONGEST_SIDE = 1800`
+- Default paths: `DEFAULT_PDF_FOLDER`, `DEFAULT_OUTPUT_FOLDER`
+- OCR prompt: `DEFAULT_PROMPT`
+
+#### 3. `providers/`
+Provider implementations following a common interface.
+
+**`base.py`**: Abstract base class defining the `process_image()` interface
+
+**`local.py`**: Local Transformers-based provider
+- Automatic Flash Attention detection
+- Model loading with optimal settings
+- Image processing with Qwen3-VL
+
+**`alibaba_cloud.py`**: Alibaba Cloud DashScope API provider
+- Uses OpenAI-compatible API endpoint
+- Requires DASHSCOPE_API_KEY environment variable
+- Supports Singapore and Beijing regions
+- No local GPU required
+
+#### 4. `converter.py`
 Utility functions for PDF manipulation using PyMuPDF.
 
 **Functions**:
@@ -40,7 +77,7 @@ Utility functions for PDF manipulation using PyMuPDF.
 - `save_images()`: Save images to disk
 - `get_pdf_page_size()`: Get PDF dimensions for DPI calculation
 
-### 3. `viewer.py`
+#### 5. `viewer.py`
 GUI application for browsing OCR results.
 
 **Features**:
@@ -51,7 +88,9 @@ GUI application for browsing OCR results.
 
 ## Available Models
 
-Edit `QWEN_MODEL` in `pdf_workflow.py` to choose:
+### Local Models (via Transformers)
+
+Edit `DEFAULT_MODEL` in `config.py` to choose:
 
 | Model | VRAM Required | MOE Setting |
 |-------|---------------|-------------|
@@ -61,6 +100,18 @@ Edit `QWEN_MODEL` in `pdf_workflow.py` to choose:
 | `Qwen/Qwen3-VL-30B-A3B-Instruct` | 80GB | `MOE = True` |
 
 **Note**: Set `MOE = True` for Mixture-of-Experts models (30B-A3B), `False` for standard models.
+
+### Cloud Models (via Alibaba Cloud DashScope)
+
+Edit `ALIBABA_MODEL` in `config.py` to choose:
+
+| Model | Description |
+|-------|-------------|
+| `qwen-vl-max-latest` | Latest VL Max model (best quality) |
+| `qwen-vl-plus` | VL Plus model (balanced) |
+| `qwen-vl-max` | Specific VL Max version |
+
+**Regions**: `singapore` or `beijing` (set via `ALIBABA_REGION` in `config.py`)
 
 ## Setup & Usage
 
@@ -82,21 +133,51 @@ local-ocr-testing/
 │   └── output/               # Results will be saved here
 ```
 
-### 3. Configure the Model
-Edit `pdf_workflow.py`:
+### 3. Configure the Workflow
+
+#### For Local Models
+
+Edit `config.py` to customize settings:
 ```python
-QWEN_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct"  # Change to your preferred model
-MOE = True  # Set to False for non-MoE models
+DEFAULT_PROVIDER = "local"
+DEFAULT_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct"  # Change to your preferred model
+USE_MOE = True  # Set to False for non-MoE models
+TARGET_LONGEST_SIDE = 1800  # Adjust image resolution
+DEFAULT_PROMPT = "..."  # Customize the OCR extraction prompt
 ```
 
-### 4. Customize the Prompt (Optional)
-Edit the `prompt` variable in `qwen_process_image()` to match your use case.
+#### For Alibaba Cloud API
 
-### 5. Run the Workflow
+1. Get your API key from [Alibaba Cloud Model Studio](https://www.alibabacloud.com/help/en/model-studio/get-api-key)
 
-**Basic usage** (uses default paths):
+2. Set the environment variable:
+```powershell
+$env:DASHSCOPE_API_KEY = "sk-your-api-key-here"
+```
+
+3. Edit `config.py`:
+```python
+DEFAULT_PROVIDER = "alibaba_cloud"
+ALIBABA_MODEL = "qwen-vl-max-latest"  # Or "qwen-vl-plus"
+ALIBABA_REGION = "singapore"  # Or "beijing"
+ALIBABA_MAX_TOKENS = 1024
+ALIBABA_TEMPERATURE = 0.1
+```
+
+### 4. Run the Workflow
+
+**Using default provider** (configured in `config.py`):
 ```powershell
 .venv\Scripts\python.exe pdf_workflow.py
+```
+
+**Specify provider via command line**:
+```powershell
+# Use local model
+.venv\Scripts\python.exe pdf_workflow.py --provider local
+
+# Use Alibaba Cloud API
+.venv\Scripts\python.exe pdf_workflow.py --provider alibaba_cloud
 ```
 
 **Custom paths**:
@@ -107,13 +188,13 @@ Edit the `prompt` variable in `qwen_process_image()` to match your use case.
 # Custom output folder
 .venv\Scripts\python.exe pdf_workflow.py --output-folder C:\path\to\output
 
-# Both custom
-.venv\Scripts\python.exe pdf_workflow.py --pdf-folder C:\pdfs --output-folder C:\output
+# All options combined
+.venv\Scripts\python.exe pdf_workflow.py --provider alibaba_cloud --pdf-folder C:\pdfs --output-folder C:\output
 ```
 
 Results will be saved to the output folder in subdirectories named after each PDF.
 
-### 6. View Results
+### 5. View Results
 
 **Basic usage** (uses default path `../../data/output/`):
 ```powershell
@@ -172,13 +253,13 @@ You can specify custom paths using command-line arguments:
 ```
 
 ### Adjust Image Resolution
-Higher DPI = better quality but slower processing:
+Edit `config.py`:
 ```python
-target_longest_side = 1800  # Increase for higher quality
+TARGET_LONGEST_SIDE = 1800  # Increase for higher quality (slower processing)
 ```
 
 ### Modify Extraction Prompt
-Edit the `prompt` variable in `qwen_process_image()` to change what gets extracted.
+Edit `DEFAULT_PROMPT` in `config.py` to change what gets extracted.
 
 ## Troubleshooting
 

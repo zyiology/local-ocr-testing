@@ -1,68 +1,69 @@
-from transformers import (
-    AutoProcessor,
-    Qwen3VLForConditionalGeneration,
-    Qwen3VLMoeForConditionalGeneration,
-)
-from converter import pdf_to_images, get_pdf_page_size, save_images
 from pathlib import Path
-import importlib.util
 import argparse
 
-QWEN_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct"
-MOE = True  # Set to True if using the MoE model
+from converter import pdf_to_images, get_pdf_page_size, save_images
+from providers import LocalProvider, AlibabaCloudProvider, VLLMProvider
+from config import (
+    DEFAULT_MODEL,
+    USE_MOE,
+    DEFAULT_PDF_FOLDER,
+    DEFAULT_OUTPUT_FOLDER,
+    TARGET_LONGEST_SIDE,
+    DEFAULT_PROMPT,
+    DEFAULT_PROVIDER,
+    ALIBABA_MODEL,
+    ALIBABA_REGION,
+    ALIBABA_MAX_TOKENS,
+    ALIBABA_TEMPERATURE,
+    VLLM_MODEL,
+    VLLM_HOST,
+    VLLM_PORT,
+    VLLM_MAX_TOKENS,
+    VLLM_TEMPERATURE,
+)
 
 
-def check_flash_attention_available() -> bool:
-    """Check if Flash Attention 2 is available on the system.
-
-    Returns:
-        bool: True if flash_attn is installed and available, False otherwise.
+def main(
+    pdf_folder_path: Path,
+    output_folder: Path = Path("output/"),
+    provider: str = "local",
+):
+    """Main workflow for batch processing PDFs with OCR.
+    
+    Args:
+        pdf_folder_path: Path to folder containing PDF files
+        output_folder: Path to output folder for results
+        provider: OCR provider to use ("local", "alibaba_cloud", or "vllm")
     """
-    return importlib.util.find_spec("flash_attn") is not None
-
-
-def main(pdf_folder_path: Path, output_folder: Path = Path("output/")):
-    # Check if Flash Attention 2 is available
-    use_flash_attn = check_flash_attention_available()
-    if use_flash_attn:
-        print("Flash Attention 2 detected - using optimized attention implementation")
-        attn_implementation = "flash_attention_2"
-    else:
-        print("Flash Attention 2 not available - using default 'eager' implementation")
-        attn_implementation = "eager"
-
-    # Load the model on the available device(s)
-    model_kwargs = {
-        "dtype": "auto",
-        "device_map": "auto",
-        "attn_implementation": attn_implementation,
-    }
-
-    if MOE:
-        model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
-            QWEN_MODEL,
-            **model_kwargs,  # type: ignore
+    # Initialize the appropriate provider
+    if provider == "local":
+        provider_model = LocalProvider(model_name=DEFAULT_MODEL, use_moe=USE_MOE)
+    elif provider == "alibaba_cloud":
+        provider_model = AlibabaCloudProvider(
+            model_name=ALIBABA_MODEL,
+            region=ALIBABA_REGION,
+            max_tokens=ALIBABA_MAX_TOKENS,
+            temperature=ALIBABA_TEMPERATURE,
+        )
+    elif provider == "vllm":
+        provider_model = VLLMProvider(
+            model_name=VLLM_MODEL,
+            host=VLLM_HOST,
+            port=VLLM_PORT,
+            max_tokens=VLLM_MAX_TOKENS,
+            temperature=VLLM_TEMPERATURE,
         )
     else:
-        model = Qwen3VLForConditionalGeneration.from_pretrained(
-            QWEN_MODEL,
-            **model_kwargs,  # type: ignore
-        )
+        raise ValueError(f"Unknown provider: {provider}")
 
-    print("model loaded")
-
-    processor = AutoProcessor.from_pretrained(QWEN_MODEL)
-
-    print("processor loaded")
-
+    # Convert all PDFs to images
     image_paths = []
     for pdf_path in pdf_folder_path.rglob("*.pdf"):
         # Get PDF page size
         page_size = get_pdf_page_size(pdf_path)
 
-        # Define DPI such that longest side is 1800 pixels
-        target_longest_side = 1800
-        dpi = int(target_longest_side / max(page_size) * 72)
+        # Define DPI such that longest side matches target resolution
+        dpi = int(TARGET_LONGEST_SIDE / max(page_size) * 72)
 
         # Convert PDF to images
         images = pdf_to_images(pdf_path, dpi=dpi)
@@ -72,82 +73,12 @@ def main(pdf_folder_path: Path, output_folder: Path = Path("output/")):
         pdf_output_folder = output_folder / relative_path.parent / pdf_path.stem
         image_paths.extend(save_images(pdf_output_folder, images))
 
+    # Process each image with the provider
     for image_path in image_paths:
-        output_text = qwen_process_image(str(image_path), model, processor)
+        output_text = provider_model.process_image(str(image_path), DEFAULT_PROMPT)
         # Save the text output alongside the image
         text_path = image_path.with_suffix(".txt")
         text_path.write_text(output_text, encoding="utf-8")
-
-
-def qwen_process_image(image_path: str, model, processor) -> str:
-    ## Adjust the prompt as needed
-
-    prompt = """There is a table in this image. I've extracted the row headers as a csv:
-
-    ```
-    RFID Tag No. / Security Label No.,,
-    Identification no. of cube,Cube Mark,
-    ,Lab Ref. No.,
-    Mould no.,,
-    Condition on received*,,
-    Edges/corners damaged**,,
-    Dimensions,W1 - width 1,mm
-    ,W2 - height,
-    ,W3 - width 2,
-    Mass,as received,kg
-    ,saturated in air,
-    ,in water,
-    Density***,by calculation,kg/m3
-    ,by water-displacement,
-    Maximum load at failure kN,,
-    Compressive strength**** MPa,,
-    Type of fracture*****,,
-    ```
-
-    Can you help me extract the data columns? You don't have to repeat the row headers again, just extract the data columns. You can ignore the rest of the document as well. Thanks!"""
-
-    ## Can use local image file, e.g. "image.png" placed in the same directory
-    ## Change to your own image path as needed
-
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "image",
-                    "image": image_path,
-                },
-                {
-                    "type": "text",
-                    "text": prompt,
-                },
-            ],
-        }
-    ]
-
-    # Preparation for inference
-    inputs = processor.apply_chat_template(
-        messages,
-        tokenize=True,
-        add_generation_prompt=True,
-        return_dict=True,
-        return_tensors="pt",
-    )
-    inputs = inputs.to(model.device)
-
-    # Inference: Generation of the output
-    generated_ids = model.generate(**inputs, max_new_tokens=1024)
-    generated_ids_trimmed = [
-        out_ids[len(in_ids) :]
-        for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
-    ]
-    output_text = processor.batch_decode(
-        generated_ids_trimmed,
-        skip_special_tokens=True,
-        clean_up_tokenization_spaces=False,
-    )
-    print(output_text[0])
-    return output_text[0]
 
 
 if __name__ == "__main__":
@@ -157,14 +88,21 @@ if __name__ == "__main__":
     parser.add_argument(
         "--pdf-folder",
         type=Path,
-        default=Path(__file__).parent / "../../data/pdfs",
-        help="Path to folder containing PDF files (default: ../../data/pdfs/)",
+        default=DEFAULT_PDF_FOLDER,
+        help=f"Path to folder containing PDF files (default: {DEFAULT_PDF_FOLDER})",
     )
     parser.add_argument(
         "--output-folder",
         type=Path,
-        default=Path(__file__).parent / "../../data/output",
-        help="Path to output folder for results (default: ../../data/output/)",
+        default=DEFAULT_OUTPUT_FOLDER,
+        help=f"Path to output folder for results (default: {DEFAULT_OUTPUT_FOLDER})",
+    )
+    parser.add_argument(
+        "--provider",
+        type=str,
+        default=DEFAULT_PROVIDER,
+        choices=["local", "alibaba_cloud", "vllm"],
+        help=f"OCR provider to use (default: {DEFAULT_PROVIDER})",
     )
 
     args = parser.parse_args()
@@ -172,6 +110,7 @@ if __name__ == "__main__":
     # Resolve paths to absolute
     pdf_folder = args.pdf_folder.resolve()
     output_folder = args.output_folder.resolve()
+    provider = args.provider  # This is already a string, don't resolve it
 
     # Validate PDF folder exists
     if not pdf_folder.exists():
@@ -188,7 +127,8 @@ if __name__ == "__main__":
 
     print(f"PDF folder: {pdf_folder}")
     print(f"Output folder: {output_folder}")
+    print(f"Provider: {provider}")
     print(f"Found {len(list(pdf_folder.rglob('*.pdf')))} PDF file(s)")
     print()
 
-    main(pdf_folder, output_folder)
+    main(pdf_folder, output_folder, provider=provider)
